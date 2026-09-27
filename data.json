@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "buidangminh23/codex-mcp-bridge",
   "package": "@minhspark/codex-mcp-bridge",
-  "updatedAt": "2026-09-27T01:28:48.183Z",
+  "updatedAt": "2026-09-27T08:12:52.969Z",
   "snapshots": [
     {
       "collectedAt": "2026-09-15T23:53:55.817Z",
@@ -5034,7 +5034,7 @@
       }
     },
     {
-      "collectedAt": "2026-09-27T01:28:48.183Z",
+      "collectedAt": "2026-09-27T08:12:52.969Z",
       "views": {
         "count": 329,
         "uniques": 127,
@@ -5477,11 +5477,11 @@
         }
       ],
       "sourceCollectedAt": {
-        "views": "2026-09-27T01:28:48.183Z",
-        "clones": "2026-09-27T01:28:48.183Z",
-        "npm": "2026-09-27T01:28:48.183Z",
-        "repository": "2026-09-27T01:28:48.183Z",
-        "releases": "2026-09-27T01:28:48.183Z"
+        "views": "2026-09-27T08:12:52.969Z",
+        "clones": "2026-09-27T08:12:52.969Z",
+        "npm": "2026-09-27T08:12:52.969Z",
+        "repository": "2026-09-27T08:12:52.969Z",
+        "releases": "2026-09-27T08:12:52.969Z"
       }
     }
   ],
@@ -5818,7 +5818,7 @@
     }
   },
   "usage": {
-    "collectedAt": "2026-09-27T01:28:50Z",
+    "collectedAt": "2026-09-27T08:12:55Z",
     "active": {
       "day": 0,
       "week": 0,
