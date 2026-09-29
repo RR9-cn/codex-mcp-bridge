@@ -26,7 +26,7 @@ Every archived source day is listed below, newest first. Active installations co
 | 2026-09-20 | 11 | 7 | 53 | 32 | 17 | Unavailable |
 | 2026-09-19 | 8 | 3 | 149 | 56 | 22 | Unavailable |
 | 2026-09-18 | 11 | 10 | 72 | 45 | 44 | Unavailable |
-| 2026-09-17 | 19 | 8 | 126 | 51 | 0 | Unavailable |
+| 2026-09-17 | 19 | 8 | 126 | 51 | 68 | Unavailable |
 | 2026-09-16 | 47 | 22 | 182 | 53 | 61 | Unavailable |
 | 2026-09-15 | 75 | 16 | 661 | 127 | 0 | Unavailable |
 | 2026-09-14 | 53 | 17 | 205 | 55 | 493 | Unavailable |
