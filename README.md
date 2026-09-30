@@ -16,10 +16,11 @@ Every archived source day is listed below, newest first. Active installations co
 
 | Date (UTC) | Views | Unique visitors | Clones | Unique cloners | npm downloads | Active installations |
 |---|---:|---:|---:|---:|---:|---:|
-| 2026-09-27 | Unavailable | Unavailable | Unavailable | Unavailable | 66 | Unavailable |
-| 2026-09-26 | Unavailable | Unavailable | Unavailable | Unavailable | 197 | Unavailable |
-| 2026-09-25 | Unavailable | Unavailable | Unavailable | Unavailable | 161 | Unavailable |
-| 2026-09-24 | Unavailable | Unavailable | Unavailable | Unavailable | 68 | Unavailable |
+| 2026-09-28 | 19 | 9 | 58 | 38 | 13 | Unavailable |
+| 2026-09-27 | 9 | 4 | 85 | 47 | 66 | Unavailable |
+| 2026-09-26 | 4 | 3 | 82 | 30 | 197 | Unavailable |
+| 2026-09-25 | 4 | 4 | 96 | 43 | 161 | Unavailable |
+| 2026-09-24 | 8 | 5 | 59 | 28 | 68 | Unavailable |
 | 2026-09-23 | 13 | 7 | 74 | 35 | 141 | Unavailable |
 | 2026-09-22 | 13 | 7 | 61 | 30 | 54 | Unavailable |
 | 2026-09-21 | 12 | 6 | 117 | 48 | 89 | Unavailable |
