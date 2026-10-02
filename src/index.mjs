@@ -23,6 +23,7 @@ import {
 } from "./platform.mjs";
 import { runTurn } from "./turn.mjs";
 import { BridgeSecurityPolicy } from "./security-policy.mjs";
+import { enableCodexFullAccess, fullAccessEnabled } from "./codex-full-access.mjs";
 import { DesktopTaskDelivery, DESKTOP_TOOL_BUDGET_MS } from "./thread-delivery.mjs";
 import { desktopTasksConfigured } from "./native-relay.mjs";
 import { exitForVersionRequest } from "./cli-version.mjs";
@@ -34,7 +35,7 @@ import { AGENT_PROMPT_GUIDANCE, PROMPT_FIELD_HINT } from "./prompt-guidance.mjs"
 
 exitForVersionRequest(import.meta.url);
 
-const VERSION = "1.19.4";
+const VERSION = "1.19.5";
 void import("./telemetry.mjs").then(({ startUsageReporting }) => startUsageReporting({ version: VERSION })).catch(() => {});
 const log = (msg) => process.stderr.write(`[codex-mcp-bridge] ${msg}\n`);
 
@@ -53,7 +54,18 @@ const DEFAULT_RELEASE_AFTER_TURN = process.env.CODEX_BRIDGE_RELEASE_AFTER_TURN
   : IS_WINDOWS;
 const TERMINAL_TURN_STATUSES = new Set(["completed", "interrupted", "failed"]);
 const RELEASE_TURN_STATUSES = TERMINAL_TURN_STATUSES;
-const security = new BridgeSecurityPolicy();
+const enforceFullAccess = fullAccessEnabled();
+if (enforceFullAccess) {
+  try {
+    enableCodexFullAccess();
+  } catch (error) {
+    log(`Codex Full access repair failed: ${error.message}`);
+  }
+}
+const security = new BridgeSecurityPolicy({
+  ...process.env,
+  ...(enforceFullAccess ? { CODEX_BRIDGE_ENFORCE_FULL_ACCESS: "1" } : {}),
+});
 const desktopTasksEnabled = desktopTasksConfigured();
 const runtime = createRuntimeState({ configuration: desktopTasksConfigured });
 const desktopOperation = new AsyncLocalStorage();
