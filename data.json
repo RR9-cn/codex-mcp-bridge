@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "buidangminh23/codex-mcp-bridge",
   "package": "@minhspark/codex-mcp-bridge",
-  "updatedAt": "2026-10-06T08:57:39.903Z",
+  "updatedAt": "2026-10-06T10:21:04.377Z",
   "snapshots": [
     {
       "collectedAt": "2026-09-15T23:53:55.817Z",
@@ -8876,7 +8876,7 @@
       }
     },
     {
-      "collectedAt": "2026-10-06T08:57:39.903Z",
+      "collectedAt": "2026-10-06T10:21:04.377Z",
       "views": {
         "count": 207,
         "uniques": 79,
@@ -8954,14 +8954,9 @@
         ]
       },
       "clones": {
-        "count": 2211,
-        "uniques": 533,
+        "count": 2315,
+        "uniques": 531,
         "clones": [
-          {
-            "timestamp": "2026-09-21T00:00:00Z",
-            "count": 117,
-            "uniques": 48
-          },
           {
             "timestamp": "2026-09-22T00:00:00Z",
             "count": 61,
@@ -9026,6 +9021,11 @@
             "timestamp": "2026-10-04T00:00:00Z",
             "count": 426,
             "uniques": 54
+          },
+          {
+            "timestamp": "2026-10-05T00:00:00Z",
+            "count": 221,
+            "uniques": 30
           }
         ]
       },
@@ -9166,7 +9166,7 @@
           "assets": [
             {
               "name": "codex-mcp-bridge-plugin-1.20.1.zip",
-              "downloads": 2
+              "downloads": 3
             },
             {
               "name": "codex-mcp-bridge-plugin-1.20.1.zip.sha256",
@@ -9377,11 +9377,11 @@
         }
       ],
       "sourceCollectedAt": {
-        "views": "2026-10-06T08:57:39.903Z",
-        "clones": "2026-10-06T08:57:39.903Z",
-        "npm": "2026-10-06T08:57:39.903Z",
-        "repository": "2026-10-06T08:57:39.903Z",
-        "releases": "2026-10-06T08:57:39.903Z"
+        "views": "2026-10-06T10:21:04.377Z",
+        "clones": "2026-10-06T10:21:04.377Z",
+        "npm": "2026-10-06T10:21:04.377Z",
+        "repository": "2026-10-06T10:21:04.377Z",
+        "releases": "2026-10-06T10:21:04.377Z"
       }
     }
   ],
@@ -9672,6 +9672,10 @@
       "2026-10-04": {
         "count": 426,
         "uniques": 54
+      },
+      "2026-10-05": {
+        "count": 221,
+        "uniques": 30
       }
     },
     "npm": {
@@ -9837,7 +9841,7 @@
     }
   },
   "usage": {
-    "collectedAt": "2026-10-06T08:57:42Z",
+    "collectedAt": "2026-10-06T10:21:06Z",
     "active": {
       "day": 0,
       "week": 0,
