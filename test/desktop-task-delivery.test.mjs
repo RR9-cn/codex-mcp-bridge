@@ -6,9 +6,13 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { DesktopTaskDelivery, DESKTOP_TOOL_BUDGET_MS } from "../src/thread-delivery.mjs";
 import { DesktopTaskReceipts } from "../src/desktop-task-receipts.mjs";
+import { NativeCreationReceipts } from "../src/native-creation-receipts.mjs";
+import { handleRelayRequest, createNativeScopeAuthorizer } from "../src/native-relay-companion.mjs";
 import { BridgeSecurityPolicy } from "../src/security-policy.mjs";
+import { captureCodexRolloutWatermark } from "../src/codex-native-response.mjs";
+import { createProjectScope, editProjectGrant, updateProjectPolicy } from "../src/project-policy.mjs";
 
-function fixture(t, { dispatch, now = Date.now, sleep, beforeRequest, beforeWrite, accountContext, senderContext, captureResponse, readResponse, inspectResponse } = {}) {
+function fixture(t, { dispatch, now = Date.now, sleep, beforeRequest, beforeWrite, accountContext, senderContext, captureResponse, readResponse, inspectResponse, securityFactory } = {}) {
   const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "desktop-receipt-delivery-")));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const cwd = path.join(directory, "project");
@@ -43,11 +47,102 @@ function fixture(t, { dispatch, now = Date.now, sleep, beforeRequest, beforeWrit
     throw new Error(`Unexpected operation ${operation}`);
   } };
   const receipts = new DesktopTaskReceipts({ directory: path.join(directory, "receipts") });
-  const createDelivery = () => new DesktopTaskDelivery({ relay, security, now, sleep, beforeRequest, accountContext, senderContext, captureResponse, readResponse, inspectResponse, receipts: new DesktopTaskReceipts({ directory: receipts.directory }) });
+  const createDelivery = () => new DesktopTaskDelivery({ relay, security: securityFactory?.(cwd) ?? security, now, sleep, beforeRequest, accountContext, senderContext, captureResponse, readResponse, inspectResponse, receipts: new DesktopTaskReceipts({ directory: receipts.directory }) });
   return { directory, cwd, calls, registered, receipts, createDelivery, delivery: createDelivery(), setState(nextStatus, nextTurn) { status = nextStatus; turnStatus = nextTurn; } };
 }
 
 describe("Desktop creation receipts and deadlines", () => {
+  it("keeps callers without a local receipt callback on the original fail-closed send contract", async (t) => {
+    const f = fixture(t, { dispatch({ operation }) {
+      if (operation === "send_message_to_thread") throw Object.assign(new Error("lost acknowledgement"), { code: "RELAY_TIMEOUT", reachedCompanion: true });
+    } });
+    await assert.rejects(f.delivery.send({ threadId: "task", prompt: "no local continuation owner" }), /lost acknowledgement/);
+    const created = await f.delivery.create({ cwd: f.cwd, prompt: "private", name: "ordinary creation" });
+    assert.equal(Object.hasOwn(created, "responseObservation"), false);
+    assert.equal(Object.hasOwn(created, "deliveryId"), false);
+  });
+
+  it("persists the original creation reply ID before returning and preserves it across retries", async (t) => {
+    const f = fixture(t);
+    const deliveryId = randomUUID();
+    let accepted = 0;
+    const args = { cwd: f.cwd, prompt: "original", name: "continuation", requestId: randomUUID(), onAccepted(binding) {
+      accepted++;
+      assert.equal(binding.responseObservation.operation, "create_thread");
+      assert.equal(binding.responseObservation.prompt, "original");
+      return deliveryId;
+    } };
+    const first = await f.delivery.create(args);
+    const reused = await f.createDelivery().create({ ...args, prompt: "edited" });
+    assert.equal(first.deliveryId, deliveryId);
+    assert.equal(reused.deliveryId, deliveryId);
+    assert.equal(reused.promptChanged, true);
+    assert.equal(accepted, 1);
+    assert.equal(f.calls.filter(({ operation }) => operation === "create_thread").length, 1);
+  });
+
+  it("preserves a pre-send binding on a lost acknowledgement without claiming acceptance or retrying", async (t) => {
+    let prepared;
+    const f = fixture(t, { captureResponse: () => ({ status: "available", fixture: true }), dispatch({ operation }) {
+      if (operation === "send_message_to_thread") {
+        assert.equal(prepared.deliveryStatus, "unconfirmed");
+        throw Object.assign(new Error("late acknowledgement"), { code: "RELAY_TIMEOUT", reachedCompanion: true });
+      }
+    } });
+    const result = await f.delivery.send({ threadId: "task", prompt: "original", onPrepared(value) { prepared = value; } });
+    assert.equal(result.deliveryStatus, "unconfirmed");
+    assert.deepEqual(result.responseObservation, prepared.responseObservation);
+    assert.equal(f.calls.filter(({ operation }) => operation === "send_message_to_thread").length, 1);
+  });
+
+  for (const operation of ["create_thread", "send_message_to_thread"]) {
+    it(`rechecks live project revocation immediately before ${operation} writes`, async (t) => {
+      let sent = false;
+      const f = fixture(t, { senderContext: () => ({ status: "verified", cwd: f.cwd }), async dispatch({ operation: actual, options }) {
+        if (actual !== operation) return;
+        updateProjectPolicy(file, (policy) => editProjectGrant(policy, "revoke", f.cwd));
+        await options.beforeSend();
+        sent = true;
+        throw new Error("must not send");
+      } });
+      const file = path.join(f.directory, "scope.json");
+      updateProjectPolicy(file, (policy) => editProjectGrant(policy, "allow-project", f.cwd));
+      f.delivery.security.hardenedRoots = createProjectScope(file);
+      const call = operation === "create_thread"
+        ? f.delivery.create({ cwd: f.cwd, name: "test", prompt: "test" })
+        : f.delivery.send({ threadId: "task-test", cwd: f.cwd, prompt: "test" });
+      await assert.rejects(call, /revoked/);
+      assert.equal(sent, false);
+    });
+  }
+
+  it("keeps rollout history local and sends only the explicitly requested prompt", async (t) => {
+    const threadId = "01a08745-d26e-7db2-aa9c-0758d52ea3e0";
+    const oldTurnId = "01a087dd-d587-76c3-93c3-60c16bc08542";
+    const secret = "HISTORICAL_CONTEXT_MUST_NEVER_BE_SENT";
+    const f = fixture(t, {
+      captureResponse: (args) => captureCodexRolloutWatermark(args, { env: { CODEX_HOME: path.join(f.directory, "codex") } }),
+      dispatch({ operation, args }) {
+        if (operation === "read_thread") return { thread: { id: threadId, kind: "codex", hostId: "local", cwd: f.cwd }, turns: [{ id: oldTurnId }] };
+        if (operation === "send_message_to_thread") {
+          assert.deepEqual(args, { threadId, prompt: "Only this handoff" });
+          return { threadId, status: "accepted" };
+        }
+      },
+    });
+    const directory = path.join(f.directory, "codex", "sessions", "2026", "09", "29");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, `rollout-2026-09-29T00-00-00-${threadId}.jsonl`), [
+      { type: "session_meta", payload: { id: threadId, originator: "codex-tui", source: "cli", cwd: f.cwd } },
+      { type: "response_item", payload: { text: secret } },
+      { type: "turn_context", payload: { turn_id: oldTurnId, cwd: f.cwd } },
+    ].map((record) => JSON.stringify(record) + "\n").join(""));
+    const delivered = await f.delivery.send({ threadId, cwd: f.cwd, prompt: "Only this handoff" });
+    assert.equal(delivered.responseObservation.watermark.status, "available");
+    assert.equal(JSON.stringify(f.calls).includes(secret), false);
+    assert.equal(JSON.stringify(delivered).includes(secret), false);
+  });
+
   for (const override of [undefined, "recipient"]) it(`blocks another project's sender before any mutation when cwd is ${override ?? "omitted"}`, async (t) => {
     let senderCwd;
     const f = fixture(t, { senderContext: () => ({ status: "verified", cwd: senderCwd }), dispatch({ operation, args }) {
@@ -277,7 +372,7 @@ describe("Desktop creation receipts and deadlines", () => {
     assert.deepEqual(result.assistantItems, [{ id: "assistant-item", text: "Recovered final" }]);
     assert.equal(f.calls.filter((call) => call.operation === "send_message_to_thread").length, 1);
     assert.equal(f.calls.filter((call) => call.operation === "create_thread").length, 0);
-    assert.deepEqual(f.calls.map((call) => call.operation), ["read_thread", "send_message_to_thread", "wait_threads", "read_thread"]);
+    assert.deepEqual(f.calls.map((call) => call.operation), ["read_thread", "send_message_to_thread", "wait_threads", "read_thread", "read_thread"]);
     assert.ok(checks >= 6);
   });
 
@@ -288,6 +383,7 @@ describe("Desktop creation receipts and deadlines", () => {
       beforeRequest: () => {},
       readResponse: () => { accounts = { ...accounts, codex: "c".repeat(64) }; return { status: "completed", text: "must be withheld", turnId: "new-turn", assistantItems: [{ id: "assistant-item", text: "must be withheld" }] }; },
       dispatch({ operation }) {
+        if (operation === "read_thread") return { thread: { id: "task", hostId: "local", cwd: f.cwd }, turns: [{ id: "new-turn" }] };
         if (operation === "wait_threads") return { polls: [{ thread: { id: "task", hostId: "local", status: { type: "idle" } }, latestTurn: { id: "new-turn", status: "completed" }, latestAssistantMessage: null }] };
       },
     });
@@ -708,3 +804,143 @@ describe("Desktop creation receipts and deadlines", () => {
     assert.equal(dispatched, false);
   });
 });
+
+it("publishes creation continuation before dispatch and resolves late confirmation without creating twice", async t => {
+  const accounts = { claude: "a".repeat(64), codex: "b".repeat(64) };
+  let prepared, complete = false;
+  const f = fixture(t, { accountContext: () => accounts, dispatch({ operation, options }) {
+    if (operation === "get_creation_receipt") return complete ? { status: "completed", result: { threadId: "late-task", hostId: "local", firstTurn: { status: "accepted" } } } : { status: "missing" };
+    if (operation === "create_thread") {
+      assert.equal(prepared.threadId, null);
+      assert.equal(options.creationReceiptId, prepared.creationObservation.receiptId);
+      throw Object.assign(Error("ack lost"), { code: "RELAY_TIMEOUT", reachedCompanion: true });
+    }
+  } });
+  const id = randomUUID(), requestId = randomUUID();
+  const created = await f.delivery.create({ cwd: f.cwd, prompt: "original", requestId,
+    onPrepared: d => { prepared = d; return id; } });
+  assert.equal(created.deliveryId, id); assert.equal(created.threadId, null);
+  const retry = await f.createDelivery().create({ cwd: f.cwd, prompt: "edited", requestId, onPrepared: () => { throw Error("duplicate preparation"); } });
+  assert.equal(retry.deliveryId, id); assert.equal(retry.promptChanged, true);
+  complete = true;
+  const resolved = await f.createDelivery().resolveCreation(prepared);
+  assert.equal(resolved.threadId, "late-task");
+  assert.equal(resolved.responseObservation.prompt, "original");
+  assert.equal(resolved.responseObservation.executorThreadId, "executor-thread");
+  assert.equal(f.calls.filter(c => c.operation === "create_thread").length, 1);
+});
+it("refuses local recoverable creation before mutation when the relay lacks receipt support", async t => {
+  const f = fixture(t, { accountContext: () => ({ claude: "a", codex: "b" }), dispatch({ operation }) {
+    if (operation === "get_creation_receipt") throw Error("unsupported operation");
+  } });
+  await assert.rejects(f.delivery.create({ cwd: f.cwd, prompt: "test", onPrepared: () => randomUUID() }), /unsupported/);
+  assert.equal(f.calls.some(c => c.operation === "create_thread"), false);
+});
+
+for (const restart of [false, true]) {
+  it(`restores owned authority only from verified late native creation, restart=${restart}`, async t => {
+    let prepared, complete = false;
+    const f = fixture(t, {
+      securityFactory: cwd => new BridgeSecurityPolicy({ CODEX_BRIDGE_ALLOWED_ROOTS: cwd }),
+      accountContext: () => ({ claude: "a".repeat(64), codex: "b".repeat(64) }),
+      dispatch({ operation }) {
+        if (operation === "get_creation_receipt") return complete
+          ? { status: "completed", result: { threadId: "late-task", hostId: "local", firstTurn: { status: "accepted" } } }
+          : { status: "missing" };
+        if (operation === "create_thread") throw Object.assign(Error("ack lost"), { code: "RELAY_TIMEOUT", reachedCompanion: true });
+      },
+    });
+    await f.delivery.create({ cwd: f.cwd, prompt: "original", onPrepared: d => { prepared = d; return randomUUID(); } });
+    const observer = restart ? f.createDelivery() : f.delivery;
+    assert.throws(() => observer.security.assertThread("late-task", f.cwd));
+    complete = true;
+    const resolved = await observer.resolveCreation(prepared);
+    assert.equal(resolved.threadId, "late-task");
+    observer.security.assertThread("late-task", f.cwd);
+    assert.equal((await observer.inspect("late-task", f.cwd)).thread.id, "late-task");
+    assert.equal(f.calls.filter(c => c.operation === "create_thread").length, 1);
+  });
+}
+
+for (const mismatch of ["id", "host", "cwd", "executor", "account", "receipt"]) {
+  it(`rejects mismatched native recovery without granting owned authority: ${mismatch}`, async t => {
+    let prepared, complete = false, changedAccount = false;
+    const f = fixture(t, {
+      securityFactory: cwd => new BridgeSecurityPolicy({ CODEX_BRIDGE_ALLOWED_ROOTS: cwd }),
+      accountContext: () => ({ claude: (changedAccount ? "c" : "a").repeat(64), codex: "b".repeat(64) }),
+      dispatch({ operation, cwd }) {
+        if (operation === "get_creation_receipt") return complete
+          ? { status: "completed", result: { threadId: "late-task", hostId: "local", firstTurn: { status: "accepted" } } }
+          : { status: "missing" };
+        if (operation === "create_thread") throw Object.assign(Error("ack lost"), { code: "RELAY_TIMEOUT", reachedCompanion: true });
+        if (operation === "read_thread" && complete) {
+          if (mismatch === "account") changedAccount = true;
+          return { thread: { id: mismatch === "id" ? "another-task" : "late-task", hostId: mismatch === "host" ? "remote" : "local", cwd: mismatch === "cwd" ? path.dirname(cwd) : cwd }, turns: [] };
+        }
+      },
+    });
+    await f.delivery.create({ cwd: f.cwd, prompt: "original", onPrepared: d => { prepared = d; return randomUUID(); } });
+    const observer = f.createDelivery();
+    const request = observer.relay.requestDesktop.bind(observer.relay);
+    observer.relay.requestDesktop = async (...args) => {
+      const envelope = await request(...args);
+      if (complete && mismatch === "executor" && args[0] === "read_thread") envelope.executorThreadId = "another-executor";
+      return envelope;
+    };
+    if (mismatch === "receipt") prepared.creationObservation.args.prompt = "tampered";
+    complete = true;
+    await assert.rejects(observer.resolveCreation(prepared));
+    assert.throws(() => observer.security.assertThread("late-task", f.cwd));
+    assert.equal(f.calls.filter(c => c.operation === "create_thread").length, 1);
+  });
+}
+
+for (const scenario of ["valid", "restart", "tampered", "unsigned"]) {
+  it(`authenticates native ownership recovery through the strict companion: ${scenario}`, async () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pr100-receipt-gate-')));
+  const cwd = path.join(root, 'project'), policy = path.join(root, 'policy.json');
+  const accounts = { claude: 'a'.repeat(64), codex: 'b'.repeat(64) }, executor = 'executor', victim = 'victim', created = 'legitimate-created';
+  let count = 0, prepared;
+  try {
+    fs.mkdirSync(cwd); updateProjectPolicy(policy, p => editProjectGrant(p, 'allow-project', cwd));
+    const env = { CODEX_BRIDGE_PROJECT_POLICY: policy, CODEX_BRIDGE_ALLOWED_ROOTS: '', CODEX_BRIDGE_THREAD_POLICY: 'owned' };
+    const nativeResult = structuredContent => ({ success: true, structuredContent });
+    const dispatchDesktop = async ({ operation, arguments: args }) => {
+      if (operation === 'list_projects') return nativeResult({ projects: [{ projectId: 'p', projectKind: 'local', hostId: 'local', path: cwd }] });
+      if (operation === 'read_thread') return nativeResult({ thread: { id: args.threadId, kind: 'codex', hostId: 'local', cwd, projectId: 'p' }, turns: [] });
+      if (operation === 'create_thread') { count++; return nativeResult({ threadId: created, hostId: 'local', firstTurn: { status: 'accepted' } }); }
+      throw Error(operation);
+    };
+    let natives = new NativeCreationReceipts({ directory: path.join(root, 'native') });
+    const receipts = new DesktopTaskReceipts({ directory: path.join(root, 'bridge') }), authorize = createNativeScopeAuthorizer({ dispatchDesktop, env });
+    const relay = { requestDesktop: async (operation, args, options) => {
+      const payload = { v: 2, operation, arguments: args, accountContext: accounts, ...(options.creationReceiptId ? { creationReceiptId: options.creationReceiptId } : {}) };
+      const r = await handleRelayRequest(payload, { dispatchDesktop, resolveExecutor: () => ({ threadId: executor }), env, assertAccount: () => {}, authorize, creationReceipts: natives, strict: true });
+      if (!r.ok) throw Error(JSON.stringify(r));
+      if (operation === 'create_thread') throw Object.assign(Error('lost ack'), { code: 'RELAY_TIMEOUT', reachedCompanion: true });
+      return r;
+    } };
+    const security = new BridgeSecurityPolicy(env), delivery = new DesktopTaskDelivery({ relay, security, accountContext: () => accounts, receipts });
+    await delivery.create({ cwd, prompt: 'original authentic prompt', onPrepared: d => { prepared = d; return randomUUID(); } });
+    const c = prepared.creationObservation, file = natives.file(c.receiptId), row = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (scenario === 'tampered') row.result.threadId = victim;
+    if (scenario === 'unsigned') delete row.signature;
+    if (['tampered', 'unsigned'].includes(scenario)) fs.writeFileSync(file, JSON.stringify(row));
+    let observer = delivery;
+    if (scenario !== 'valid') {
+      natives = new NativeCreationReceipts({ directory: natives.directory });
+      observer = new DesktopTaskDelivery({ relay, security: new BridgeSecurityPolicy(env), accountContext: () => accounts, receipts: new DesktopTaskReceipts({ directory: receipts.directory }) });
+    }
+    if (["tampered", "unsigned"].includes(scenario)) {
+      await assert.rejects(observer.resolveCreation(prepared), /signature/);
+      assert.equal(observer.security.isThreadAuthorized(created, cwd), false);
+    } else {
+      const recovered = await observer.resolveCreation(prepared);
+      assert.equal(recovered.threadId, created);
+      assert.equal(observer.security.isThreadAuthorized(created, cwd), true);
+    }
+    assert.equal(observer.security.isThreadAuthorized(victim, cwd), false);
+    assert.equal(count, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
