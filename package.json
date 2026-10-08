@@ -22,6 +22,7 @@
   },
   "type": "module",
   "bin": {
+    "codex-desktop-mcp": "src/codex-desktop-mcp.mjs",
     "codex-mcp-bridge": "src/codex-bridge-launcher.mjs",
     "claude-mcp-bridge": "src/claude-bridge-launcher.mjs",
     "codex-mcp-bridge-install": "scripts/install-claude-desktop.mjs",
@@ -49,7 +50,8 @@
     "docs/daily-handoffs.md",
     "docs/new-machine-setup.md",
     "docs/project-onboarding.md",
-    "docs/desktop-handoff-design.md"
+    "docs/desktop-handoff-design.md",
+    "docs/codex-desktop-only.md"
   ],
   "publishConfig": {
     "access": "public"

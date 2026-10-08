@@ -4,6 +4,15 @@
 
 <h1 align="center">codex-mcp-bridge</h1>
 
+## Codex Desktop-only MCP adaptation
+
+This fork adds a local MCP entry that exposes Codex Desktop without requiring
+Claude. It supports STDIO and loopback Streamable HTTP, seven Desktop tools,
+directory scope checks, and persistent write receipts. See the
+[Desktop-only setup and HTTP guide](docs/codex-desktop-only.md).
+
+The upstream Claude/Codex bridge remains available below.
+
 Local Desktop handoff guides: [daily workflow and directory verification](docs/daily-handoffs.md), [new-machine setup and permissions](docs/new-machine-setup.md), and [project onboarding](docs/project-onboarding.md).
 
 [![npm](https://img.shields.io/npm/v/@minhspark/codex-mcp-bridge?logo=npm&color=CB3837)](https://www.npmjs.com/package/@minhspark/codex-mcp-bridge)
